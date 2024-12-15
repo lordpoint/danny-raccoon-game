@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raccoon Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            background: #1f0d3d;
+        }
+        #healthBar {
+            height: 20px;
+            width: 200px;
+            background-color: red;
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            border: 2px solid black;
+        }
+        #health {
+            height: 100%;
+            background-color: green;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="healthBar">
+        <div id="health"></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const healthBar = document.getElementById('health');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const houseImage = new Image();
+        houseImage.src = './assets/house.png';
+        const mouseImage = new Image();
+        mouseImage.src = './assets/mouse.png';
+
+        let health = 100;
+        let gameRunning = true;
+        let inTree = false; // Tracks if the raccoon is in a tree
+
+        let statusMessage = "";
+
+        const raccoon = {
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            width: 80,
+            height: 40,
+            speed: 4,
+            attacking: false,
+            image: new Image()
+        };
+        raccoon.image.src = './assets/ruccoon.png'; // Path to the raccoon image
+
+       
+
+        const houses = [
+            { x: 100, y: 100, width: 200, height: 200, trashOffsetX: 20, trashOffsetY: -50 },
+            { x: 400, y: 200, width: 200, height: 200, trashOffsetX: 20, trashOffsetY: -50 },
+            { x: 700, y: 300, width: 200, height: 200, trashOffsetX: 20, trashOffsetY: -50 }
+        ];
+
+        const trashCans = houses.map(house => ({
+            x: house.x + house.trashOffsetX,
+            y: house.y + house.height + house.trashOffsetY,
+            width: 20,
+            height: 40
+        }));
+
+        const trees = [
+            { x: 200, y: 400, radius: 20 },
+            { x: 600, y: 100, radius: 20 },
+            { x: 800, y: 500, radius: 20 }
+        ];
+
+        const enemies = [
+            { 
+                x: 500, 
+                y: 500, 
+                width: 20, 
+                height: 10, 
+                speed: 1, 
+                color: 'gray', 
+                attacking: false,
+                directionX: Math.random() * 2 - 1, // Initial random direction
+                directionY: Math.random() * 2 - 1, 
+                directionTimer: 0, // Timer to track direction changes
+                attackCooldown: 0,
+                health: 50 // Health for the enemy
+            }
+        ];
+
+        let keys = {};
+
+        document.addEventListener('keydown', e => {
+            keys[e.key] = true;
+            if (e.key === 's') climbTree();
+            if (e.key === 'd') climbDown();
+            if (e.key === ' ') raccoon.attacking = true;
+            if (e.key === 'a' && isNearTrashCan()) {
+                updateHealth(1);
+                statusMessage = "Yum! Found some food!";
+            }
+        });
+
+        document.addEventListener('keyup', e => {
+            keys[e.key] = false;
+            if (e.key === ' ') raccoon.attacking = false;
+        });
+
+        function drawStatusBar() {
+            const statusBarHeight = 50;
+            const padding = 20;
+
+            // Draw the status bar background
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, canvas.height - statusBarHeight, canvas.width, statusBarHeight);
+
+            // Draw the status message text
+            ctx.fillStyle = 'white';
+            ctx.font = '22px Arial';
+            ctx.fillText(statusMessage, padding, canvas.height - padding);
+        }
+
+        function drawRaccoon() {
+            if (raccoon.attacking) {
+                // Make raccoon semi-transparent when attacking
+                ctx.globalAlpha = 0.5;
+            }
+            ctx.drawImage(raccoon.image, raccoon.x, raccoon.y, raccoon.width, raccoon.height);
+            ctx.globalAlpha = 1.0; // Reset transparency
+        }
+
+        function drawHouses() {
+            houses.forEach(house => {
+                ctx.drawImage(houseImage, house.x, house.y, house.width, house.height);
+            });
+        }
+
+        function drawTrashCans() {
+            trashCans.forEach(can => {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'; // Optional: visual reference for hit box
+                ctx.fillRect(can.x, can.y, can.width, can.height);
+            });
+        }
+
+        function drawTrees() {
+            trees.forEach(tree => {
+                ctx.beginPath();
+                ctx.arc(tree.x, tree.y, tree.radius, 0, Math.PI * 2);
+                ctx.fillStyle = 'brown';
+                ctx.fill();
+            });
+        }
+
+        function spawnNewEnemy() {
+            const newEnemy = { 
+                x: Math.random() * canvas.width, 
+                y: Math.random() * canvas.height, 
+                width: 20, 
+                height: 10, 
+                speed: 1, 
+                color: 'gray', 
+                attacking: false,
+                directionX: Math.random() * 2 - 1,
+                directionY: Math.random() * 2 - 1,
+                directionTimer: 0,
+                attackCooldown: 0,
+                health: 50
+            };
+            enemies.push(newEnemy);
+        }
+
+        function drawEnemies() {
+            enemies.forEach(enemy => {
+                ctx.drawImage(mouseImage, enemy.x, enemy.y, enemy.width, enemy.height);
+                drawEnemyHealthBar(enemy);
+            });
+        }
+
+        function drawEnemyHealthBar(enemy) {
+            const barWidth = 40;
+            const barHeight = 5;
+            const barX = enemy.x + (enemy.width / 2) - (barWidth / 2);
+            const barY = enemy.y - 10;
+
+            // Draw background (red for missing health)
+            ctx.fillStyle = 'red';
+            ctx.fillRect(barX, barY, barWidth, barHeight);
+
+            // Draw foreground (green for remaining health)
+            const healthPercentage = enemy.health / 50; // Assuming max health is 50
+            ctx.fillStyle = 'green';
+            ctx.fillRect(barX, barY, barWidth * healthPercentage, barHeight);
+        }
+
+        function updateHealth(amount) {
+            health = Math.max(0, Math.min(100, health + amount));
+            healthBar.style.width = `${health * 2}px`;
+            if (health === 0) gameRunning = false;
+        }
+
+        function climbTree() {
+            trees.forEach(tree => {
+                const dist = Math.hypot(raccoon.x + raccoon.width / 2 - tree.x, raccoon.y + raccoon.height / 2 - tree.y);
+                if (dist < tree.radius + raccoon.width / 2) {
+                    inTree = true;
+                }
+            });
+        }
+
+        function climbDown() {
+            inTree = false;
+        }
+
+        function smoothRandomMove(enemy) {
+            if (enemy.directionTimer <= 0) {
+                // Set a new random direction and reset the timer
+                enemy.directionX = Math.random() * 2 - 1; // Random direction between -1 and 1
+                enemy.directionY = Math.random() * 2 - 1;
+                enemy.directionTimer = Math.random() * 100 + 50; // Random duration between 50 and 150 frames
+            }
+
+            // Move the enemy in the current direction
+            enemy.x += enemy.directionX * enemy.speed;
+            enemy.y += enemy.directionY * enemy.speed;
+
+            // Keep the enemy within canvas bounds
+            enemy.x = Math.max(0, Math.min(canvas.width - enemy.width, enemy.x));
+            enemy.y = Math.max(0, Math.min(canvas.height - enemy.height, enemy.y));
+
+            // Decrease the direction timer
+            enemy.directionTimer--;
+        }
+
+        function isRaccoonAttackingEnemy(enemy) {
+            return (
+                raccoon.attacking &&
+                raccoon.x < enemy.x + enemy.width &&
+                raccoon.x + raccoon.width > enemy.x &&
+                raccoon.y < enemy.y + enemy.height &&
+                raccoon.y + raccoon.height > enemy.y
+            );
+        }
+
+        function moveEnemies() {
+            enemies.forEach((enemy, index) => {
+                const dx = raccoon.x - enemy.x;
+                const dy = raccoon.y - enemy.y;
+                const dist = Math.hypot(dx, dy);
+
+                if (inTree) {
+                    // When the raccoon is in a tree
+                    statusMessage = "You're safe! The mouse is searching.";
+                    smoothRandomMove(enemy);
+                    enemy.attacking = false;
+                } else {
+                    // Update attacking logic
+                    if (dist < 200) {
+                        enemy.attacking = true;
+                        statusMessage = "Look out! The mouse is attacking!";
+                    } else {
+                        enemy.attacking = false;
+                        statusMessage = "The mouse is moving around.";
+                    }
+
+                    // Handle damage with cooldown
+                    if (dist < 30 && enemy.attackCooldown <= 0) {
+                        updateHealth(-5);
+                        statusMessage = "You're being injured!";
+                        enemy.attackCooldown = 60; // Set cooldown (1 second)
+                    }
+
+                    if (dist > 10) {
+                        enemy.x += enemy.speed * (dx / dist);
+                        enemy.y += enemy.speed * (dy / dist);
+                    }
+
+                    // Check if the raccoon is attacking the mouse
+                    if (isRaccoonAttackingEnemy(enemy)) {
+                        enemy.health -= 10; // Reduce mouse's health
+                        statusMessage = "You hit the mouse!";
+                        if (enemy.health <= 0) {
+                            enemies.splice(index, 1); // Remove enemy if health <= 0
+                            statusMessage = "You defeated the mouse!";
+                        }
+                    }
+                }
+
+                if (enemy.health <= 0) {
+                    enemies.splice(index, 1); // Remove enemy if health <= 0
+                    statusMessage = "You defeated the mouse!";
+                    setTimeout(spawnNewEnemy, 10000); // Spawn new enemy after 20 seconds
+                }
+
+                // Reduce cooldown timer
+                if (enemy.attackCooldown > 0) {
+                    enemy.attackCooldown--;
+                }
+            });
+        }
+            
+
+        function moveRaccoon() {
+            if (!inTree) {
+                if (keys['ArrowUp']) raccoon.y -= raccoon.speed;
+                if (keys['ArrowDown']) raccoon.y += raccoon.speed;
+                if (keys['ArrowLeft']) raccoon.x -= raccoon.speed;
+                if (keys['ArrowRight']) raccoon.x += raccoon.speed;
+
+                raccoon.x = Math.max(0, Math.min(canvas.width - raccoon.width, raccoon.x));
+                raccoon.y = Math.max(0, Math.min(canvas.height - raccoon.height, raccoon.y));
+            }
+        }
+
+        function isNearTrashCan() {
+            return trashCans.some(can => {
+                return raccoon.x < can.x + can.width &&
+                    raccoon.x + raccoon.width > can.x &&
+                    raccoon.y < can.y + can.height &&
+                    raccoon.y + raccoon.height > can.y;
+            });
+        }
+
+        function gameLoop() {
+            if (!gameRunning) {
+                alert('Game Over!');
+                return;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            drawHouses();
+            drawTrashCans();
+            drawTrees();
+            drawRaccoon();
+            drawEnemies();
+            drawStatusBar(); // Draw the status bar at the bottom of the screen
+
+            moveRaccoon();
+            moveEnemies();
+
+            requestAnimationFrame(gameLoop);
+        }
+        // Wait for the raccoon image to load before starting the game
+        raccoon.image.onload = () => {
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
